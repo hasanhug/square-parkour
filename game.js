@@ -11,7 +11,9 @@ resizeCanvas();
 
 // Constants & Settings
 const GROUND_HEIGHT = 120; // Height of the white ground from bottom
-const PLAYER_SIZE = 48;    // Size of the square
+const PLAYER_SIZE = 48;  
+const PLAYER_COLOR = '#ff4757';  // Neon coral color
+const PLAYER_BORDER = 5;    // Border thickness in pixels for hollow square
 const SPEED = 360;         // Horizontal speed (pixels per second)
 const GRAVITY = 1800;      // Gravity acceleration (pixels per second^2)
 const JUMP_FORCE = -720;   // Upward jump impulse
@@ -134,10 +136,18 @@ function gameLoop(currentTime) {
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, groundY, canvas.width, GROUND_HEIGHT);
 
-  // Render Black Square Player
+  // Render Hollow Neon Coral Square Player
   const playerScreenX = player.x - cameraOffsetX;
-  ctx.fillStyle = '#000000';
-  ctx.fillRect(playerScreenX, player.y, player.size, player.size);
+  ctx.strokeStyle = PLAYER_COLOR;
+  ctx.lineWidth = PLAYER_BORDER;
+  // Offset by half stroke width so outer edge aligns exactly with player collision box
+  const halfBorder = PLAYER_BORDER / 2;
+  ctx.strokeRect(
+    playerScreenX + halfBorder,
+    player.y + halfBorder,
+    player.size - PLAYER_BORDER,
+    player.size - PLAYER_BORDER
+  );
 
   requestAnimationFrame(gameLoop);
 }
