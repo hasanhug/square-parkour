@@ -52,6 +52,9 @@ function initClouds() {
 }
 initClouds();
 
+// Input State (Hold-to-jump buffering)
+let isJumpHeld = false;
+
 // Jump Trigger
 function tryJump() {
   if (player.isGrounded) {
@@ -62,17 +65,39 @@ function tryJump() {
 
 // Input Handlers
 window.addEventListener('pointerdown', (e) => {
-  // Left-click (button === 0) or touch/pen
   if (e.button === 0) {
+    isJumpHeld = true;
     tryJump();
   }
+});
+
+window.addEventListener('pointerup', () => {
+  isJumpHeld = false;
+});
+
+window.addEventListener('pointercancel', () => {
+  isJumpHeld = false;
 });
 
 window.addEventListener('keydown', (e) => {
   if (e.code === 'Space') {
     e.preventDefault();
-    tryJump();
+    if (!e.repeat) {
+      isJumpHeld = true;
+      tryJump();
+    }
   }
+});
+
+window.addEventListener('keyup', (e) => {
+  if (e.code === 'Space') {
+    e.preventDefault();
+    isJumpHeld = false;
+  }
+});
+
+window.addEventListener('blur', () => {
+  isJumpHeld = false;
 });
 
 // Helper: Draw a stylized fluffy cloud
@@ -116,11 +141,19 @@ function gameLoop(currentTime) {
   // Ground collision check & Rotation
   if (player.y >= groundY - player.size) { 
     player.y = groundY - player.size;
-    player.vy = 0;
-    player.isGrounded = true;
+    
     // Snap to nearest 90 degrees (Math.PI / 2) upon landing
     const rightAngle = Math.PI / 2;
     player.rotation = Math.round(player.rotation / rightAngle) * rightAngle;
+
+    if (isJumpHeld) {
+      // Immediate continuous jump (Geometry Dash buffer mechanic)
+      player.vy = JUMP_FORCE;
+      player.isGrounded = false;
+    } else {
+      player.vy = 0;
+      player.isGrounded = true;
+    }
   } else {
     player.isGrounded = false;
     // Rotate clockwise while in air (Geometry Dash style)
