@@ -16,11 +16,13 @@ const PLAYER_COLOR = '#ff4757';   // Neon coral color
 const PLAYER_BORDER = 5;         // Border thickness in pixels for outer hollow square
 const INNER_SQUARE_SIZE = 16;    // ~1/3 size of outer square
 const INNER_BORDER = 3.5;        // Border thickness for inner hollow square
-const SPEED = 360;               // Horizontal speed (pixels per second)
-const GRAVITY = 1800;            // Gravity acceleration (pixels per second^2)
-const JUMP_FORCE = -720;         // Upward jump impulse
-// Jump air-time = 2 * (720 / 1800) = 0.8s. For 360 deg (2*PI) rotation per jump:
-const ROTATION_SPEED = (Math.PI * 2) / 0.8; // Radians per second (~450 deg/s)
+const SPEED = 400;               // Horizontal speed (pixels per second)
+const GRAVITY = 2500;            // Punchy Geometry Dash arcade gravity (pixels per second^2)
+const JUMP_FORCE = -735;         // Jump impulse (yields ~108px / 2.25 block peak clearance)
+// Air-time = 2 * (735 / 2500) ≈ 0.588s. 
+// For exact Geometry Dash 180 deg (Math.PI radians) half-flip per jump:
+const JUMP_AIR_TIME = (2 * Math.abs(JUMP_FORCE)) / GRAVITY;
+const ROTATION_SPEED = Math.PI / JUMP_AIR_TIME; // Exactly 180° per jump
 
 // Game State
 const player = {
