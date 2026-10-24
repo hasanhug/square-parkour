@@ -10,13 +10,17 @@ window.addEventListener('resize', resizeCanvas);
 resizeCanvas();
 
 // Constants & Settings
-const GROUND_HEIGHT = 120; // Height of the white ground from bottom
-const PLAYER_SIZE = 48;  
-const PLAYER_COLOR = '#ff4757';  // Neon coral color
-const PLAYER_BORDER = 5;    // Border thickness in pixels for hollow square
-const SPEED = 360;         // Horizontal speed (pixels per second)
-const GRAVITY = 1800;      // Gravity acceleration (pixels per second^2)
-const JUMP_FORCE = -720;   // Upward jump impulse
+const GROUND_HEIGHT = 120;       // Height of the white ground from bottom
+const PLAYER_SIZE = 48;          // Size of the square
+const PLAYER_COLOR = '#ff4757';   // Neon coral color
+const PLAYER_BORDER = 5;         // Border thickness in pixels for outer hollow square
+const INNER_SQUARE_SIZE = 16;    // ~1/3 size of outer square
+const INNER_BORDER = 3.5;        // Border thickness for inner hollow square
+const SPEED = 360;               // Horizontal speed (pixels per second)
+const GRAVITY = 1800;            // Gravity acceleration (pixels per second^2)
+const JUMP_FORCE = -720;         // Upward jump impulse
+// Jump air-time = 2 * (720 / 1800) = 0.8s. For 360 deg (2*PI) rotation per jump:
+const ROTATION_SPEED = (Math.PI * 2) / 0.8; // Radians per second (~450 deg/s)
 
 // Game State
 const player = {
@@ -24,6 +28,7 @@ const player = {
   y: 0,
   size: PLAYER_SIZE,
   vy: 0,
+  rotation: 0,
   isGrounded: false
 };
 
@@ -108,13 +113,18 @@ function gameLoop(currentTime) {
   player.vy += GRAVITY * dt;
   player.y += player.vy * dt;
 
-  // Ground collision check
+  // Ground collision check & Rotation
   if (player.y >= groundY - player.size) { 
     player.y = groundY - player.size;
     player.vy = 0;
     player.isGrounded = true;
+    // Snap to nearest 90 degrees (Math.PI / 2) upon landing
+    const rightAngle = Math.PI / 2;
+    player.rotation = Math.round(player.rotation / rightAngle) * rightAngle;
   } else {
     player.isGrounded = false;
+    // Rotate clockwise while in air (Geometry Dash style)
+    player.rotation += ROTATION_SPEED * dt;
   }
 
   // Camera tracking (player stays at a fixed screen horizontal position)
@@ -136,18 +146,28 @@ function gameLoop(currentTime) {
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, groundY, canvas.width, GROUND_HEIGHT);
 
-  // Render Hollow Neon Coral Square Player
-  const playerScreenX = player.x - cameraOffsetX;
+  // Render Player (Rotated Outer & Inner Hollow Squares)
+  const playerCenterX = (player.x - cameraOffsetX) + player.size / 2;
+  const playerCenterY = player.y + player.size / 2;
+
+  ctx.save();
+  ctx.translate(playerCenterX, playerCenterY);
+  ctx.rotate(player.rotation);
+
   ctx.strokeStyle = PLAYER_COLOR;
+
+  // 1. Outer Hollow Square
   ctx.lineWidth = PLAYER_BORDER;
-  // Offset by half stroke width so outer edge aligns exactly with player collision box
-  const halfBorder = PLAYER_BORDER / 2;
-  ctx.strokeRect(
-    playerScreenX + halfBorder,
-    player.y + halfBorder,
-    player.size - PLAYER_BORDER,
-    player.size - PLAYER_BORDER
-  );
+  const outerOffset = player.size / 2 - PLAYER_BORDER / 2;
+  const outerDrawSize = player.size - PLAYER_BORDER;
+  ctx.strokeRect(-outerOffset, -outerOffset, outerDrawSize, outerDrawSize);
+
+  // 2. Inner Hollow Square (~1/3 size)
+  ctx.lineWidth = INNER_BORDER;
+  const innerOffset = INNER_SQUARE_SIZE / 2;
+  ctx.strokeRect(-innerOffset, -innerOffset, INNER_SQUARE_SIZE, INNER_SQUARE_SIZE);
+
+  ctx.restore();
 
   requestAnimationFrame(gameLoop);
 }
