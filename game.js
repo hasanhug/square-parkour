@@ -24,6 +24,41 @@ const JUMP_FORCE = -735;         // Jump impulse (yields ~108px / 2.25 block pea
 const JUMP_AIR_TIME = (2 * Math.abs(JUMP_FORCE)) / GRAVITY;
 const ROTATION_SPEED = Math.PI / JUMP_AIR_TIME; // Exactly 180° per jump
 
+// Spike Constants
+const SPIKE_WIDTH = 48;          // Geometry dash standard 1-block width
+const SPIKE_HEIGHT = 48;         // Geometry dash standard 1-block height
+const SPIKE_BORDER = 2;          // Thin black outline
+const INITIAL_SAFE_DISTANCE = 700; // Safe runway before first spike
+
+// Spikes State
+const spikes = [];
+let nextSpikeX = INITIAL_SAFE_DISTANCE;
+
+// Spawns spike clusters ahead of the viewport
+function updateSpikeGeneration(cameraRightEdge) {
+  while (nextSpikeX < cameraRightEdge + 600) {
+    // Cluster size: 1, 2, or 3 adjacent touching spikes
+    const count = 1 + Math.floor(Math.random() * 3);
+    for (let i = 0; i < count; i++) {
+      spikes.push({
+        x: nextSpikeX + i * SPIKE_WIDTH,
+        width: SPIKE_WIDTH,
+        height: SPIKE_HEIGHT
+      });
+    }
+    // Jump total travel is ~235px. For 3 spikes (144px), jump spans from ~-45px to +189px.
+    // Safe landing gap: at least 320px to 540px so the player can land, stabilize, and time the next jump.
+    const clusterTotalWidth = count * SPIKE_WIDTH;
+    const landingGap = 340 + Math.random() * 260;
+    nextSpikeX += clusterTotalWidth + landingGap;
+  }
+
+  // Despawn spikes that scrolled far behind player (more than 400px offscreen left)
+  while (spikes.length > 0 && spikes[0].x < nextSpikeX - 4000 && spikes[0].x < player.x - 500) {
+    spikes.shift();
+  }
+}
+
 // Game State
 const player = {
   x: 100,
@@ -122,6 +157,43 @@ function drawCloud(x, y, scale) {
   ctx.restore();
 }
 
+// Helper: Draw an upright white spike with a thin black border
+function drawSpike(x, groundY, width, height) {
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(x, groundY);
+  ctx.lineTo(x + width / 2, groundY - height);
+  ctx.lineTo(x + width, groundY);
+  ctx.closePath();
+
+  // White interior
+  ctx.fillStyle = '#ffffff';
+  ctx.fill();
+
+  // Thin black border
+  ctx.strokeStyle = '#000000';
+  ctx.lineWidth = SPIKE_BORDER;
+  ctx.lineJoin = 'round';
+  ctx.stroke();
+  ctx.restore();
+}
+
+// Geometry Dash accurate spike hitbox check (active hitboxes for future death logic)
+function checkSpikeCollision(playerBox, spike) {
+  // Inset hitbox slightly (forgiving GD style)
+  const marginX = spike.width * 0.18;
+  const spikeLeft = spike.x + marginX;
+  const spikeRight = spike.x + spike.width - marginX;
+  const spikeTop = canvas.height - GROUND_HEIGHT - spike.height * 0.85;
+  const spikeBottom = canvas.height - GROUND_HEIGHT;
+
+  // AABB check against player bounding box
+  const overlapsX = playerBox.x + playerBox.size > spikeLeft && playerBox.x < spikeRight;
+  const overlapsY = playerBox.y + playerBox.size > spikeTop && playerBox.y < spikeBottom;
+
+  return overlapsX && overlapsY;
+}
+
 // Main Game Loop with Delta Time
 let lastTime = performance.now();
 
@@ -164,6 +236,17 @@ function gameLoop(currentTime) {
 
   // Camera tracking (player stays at a fixed screen horizontal position)
   const cameraOffsetX = player.x - canvas.width * 0.22;
+  const cameraRightEdge = cameraOffsetX + canvas.width;
+
+  // Procedural Spike Generation
+  updateSpikeGeneration(cameraRightEdge);
+
+  // Optional: check collisions (active hitbox ready for future versions, harmless for now)
+  for (const spike of spikes) {
+    if (checkSpikeCollision(player, spike)) {
+      // Hitbox registered - no death triggered in Version 6
+    }
+  }
 
   // 2. Render Scene
   // Sky Background
@@ -180,6 +263,23 @@ function gameLoop(currentTime) {
   // Render Endless White Ground
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, groundY, canvas.width, GROUND_HEIGHT);
+
+  // Thin Black Border on top of terrain
+  ctx.strokeStyle = '#000000';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(0, groundY);
+  ctx.lineTo(canvas.width, groundY);
+  ctx.stroke();
+
+  // Render Spikes
+  for (const spike of spikes) {
+    const spikeScreenX = spike.x - cameraOffsetX;
+    // Only render if visible on screen
+    if (spikeScreenX + spike.width > -50 && spikeScreenX < canvas.width + 50) {
+      drawSpike(spikeScreenX, groundY, spike.width, spike.height);
+    }
+  }
 
   // Render Player (Rotated Outer & Inner Hollow Squares)
   const playerCenterX = (player.x - cameraOffsetX) + player.size / 2;
