@@ -43,8 +43,8 @@ let currentTier = 0; // Current platform tier (0 = main ground)
 function updateWorldGeneration(cameraRightEdge) {
   const groundY = canvas.height - GROUND_HEIGHT;
 
-  while (nextGenerationX < cameraRightEdge + 800) {
-    const isPlatformEncounter = Math.random() < 0.65;
+  while (nextGenerationX < cameraRightEdge + 900) {
+    const isPlatformEncounter = Math.random() < 0.70;
 
     if (!isPlatformEncounter && currentTier === 0) {
       // Standard Ground Spike Cluster (1-3 spikes)
@@ -58,19 +58,18 @@ function updateWorldGeneration(cameraRightEdge) {
         });
       }
       const clusterWidth = count * SPIKE_WIDTH;
-      const landingGap = 340 + Math.random() * 260;
+      const landingGap = 350 + Math.random() * 250;
       nextGenerationX += clusterWidth + landingGap;
     } else {
-      // Platform Sequence (Stepping up or down)
       // Determine target tier (can go up by 1, stay same, or step down to 0)
       let targetTier = currentTier;
       if (currentTier === 0) {
-        targetTier = 1; // Step up to tier 1
+        targetTier = 1;
       } else {
         const roll = Math.random();
-        if (roll < 0.40) {
+        if (roll < 0.45) {
           targetTier = currentTier + 1; // Step up by 1 tier
-        } else if (roll < 0.70) {
+        } else if (roll < 0.75) {
           targetTier = currentTier; // Continue at same tier
         } else {
           targetTier = 0; // Return to main ground
@@ -78,17 +77,32 @@ function updateWorldGeneration(cameraRightEdge) {
       }
 
       if (targetTier > currentTier) {
-        // Stepping UP (e.g. 0 -> 1 or 1 -> 2):
-        // Optionally spawn 1-3 spikes touching the front wall of the new platform
-        const hasFrontSpikes = Math.random() < 0.55;
+        // Stepping UP (e.g. 0 -> 1 or 1 -> 2)
+        // Optionally spawn 1-2 front spikes touching the front wall of the new platform
+        const hasFrontSpikes = Math.random() < 0.50;
         let frontSpikeCount = 0;
+        const currentBaseY = groundY - currentTier * BLOCK_SIZE;
+
         if (hasFrontSpikes) {
-          // If jumping from ground to tier 1, 1-2 front spikes are safe to clear onto platform
           frontSpikeCount = 1 + Math.floor(Math.random() * 2);
+          
+          // CRITICAL: If we are already on an elevated platform (currentTier > 0),
+          // DO NOT leave the space under the spikes empty!
+          // We create a solid platform extension directly beneath these spikes!
+          if (currentTier > 0) {
+            platforms.push({
+              x: nextGenerationX,
+              y: currentBaseY,
+              width: frontSpikeCount * BLOCK_SIZE,
+              height: currentTier * BLOCK_SIZE,
+              tier: currentTier
+            });
+          }
+
           for (let i = 0; i < frontSpikeCount; i++) {
             spikes.push({
               x: nextGenerationX + i * SPIKE_WIDTH,
-              baseY: groundY - currentTier * BLOCK_SIZE,
+              baseY: currentBaseY,
               width: SPIKE_WIDTH,
               height: SPIKE_HEIGHT
             });
@@ -98,8 +112,8 @@ function updateWorldGeneration(cameraRightEdge) {
         const frontOffset = frontSpikeCount * SPIKE_WIDTH;
         const platformStartX = nextGenerationX + frontOffset;
 
-        // Platform block length: 1 to 12 blocks
-        const blockLength = 1 + Math.floor(Math.random() * 12);
+        // Platform block length: minimum 5 blocks, up to 14 blocks
+        const blockLength = 5 + Math.floor(Math.random() * 10);
         const platformWidth = blockLength * BLOCK_SIZE;
         const platformY = groundY - targetTier * BLOCK_SIZE;
 
@@ -111,38 +125,36 @@ function updateWorldGeneration(cameraRightEdge) {
           tier: targetTier
         });
 
-        // Optionally add spikes ON TOP of the platform if length allows
-        // Need at least 1 square landing space before a spike, and space to jump
-        if (blockLength >= 4 && Math.random() < 0.65) {
-          const maxSpikesOnPlatform = Math.min(2, blockLength - 3);
-          const spikeCount = 1 + Math.floor(Math.random() * maxSpikesOnPlatform);
-          const spikeStartBlock = 1 + Math.floor(Math.random() * (blockLength - spikeCount - 1));
-          for (let s = 0; s < spikeCount; s++) {
-            spikes.push({
-              x: platformStartX + (spikeStartBlock + s) * BLOCK_SIZE,
-              baseY: platformY,
-              width: SPIKE_WIDTH,
-              height: SPIKE_HEIGHT
-            });
+        // Optionally add spikes ON TOP of the platform:
+        // RULE: Always at least 2 squares (2 * BLOCK_SIZE = 96px) of clear space before the first spike!
+        if (blockLength >= 6 && Math.random() < 0.65) {
+          const minLeadBlocks = 2; // At least 2 clear squares of space
+          const availableBlocks = blockLength - minLeadBlocks - 2; // Leave at least 2 exit landing blocks
+          if (availableBlocks >= 1) {
+            const spikeCount = 1 + Math.floor(Math.random() * Math.min(2, availableBlocks));
+            const spikeStartBlock = minLeadBlocks + Math.floor(Math.random() * (availableBlocks - spikeCount + 1));
+            for (let s = 0; s < spikeCount; s++) {
+              spikes.push({
+                x: platformStartX + (spikeStartBlock + s) * BLOCK_SIZE,
+                baseY: platformY,
+                width: SPIKE_WIDTH,
+                height: SPIKE_HEIGHT
+              });
+            }
           }
         }
 
         currentTier = targetTier;
         nextGenerationX = platformStartX + platformWidth;
-
-        // If tier remains > 0, leave at least 1-2 blocks of clear space before next step
-        if (currentTier > 0) {
-          // Small transition gap or direct continuation
-        }
       } else if (targetTier < currentTier) {
         // Stepping DOWN back to ground
         currentTier = 0;
         // Safe clear ground landing after stepping off platform
-        const landingRunway = 360 + Math.random() * 200;
+        const landingRunway = 380 + Math.random() * 200;
         nextGenerationX += landingRunway;
       } else {
-        // Continue on current tier or gap
-        const blockLength = 2 + Math.floor(Math.random() * 6);
+        // Continuation on current tier (minimum 5 blocks)
+        const blockLength = 5 + Math.floor(Math.random() * 6);
         const platformStartX = nextGenerationX;
         const platformWidth = blockLength * BLOCK_SIZE;
         const platformY = groundY - currentTier * BLOCK_SIZE;
@@ -155,17 +167,17 @@ function updateWorldGeneration(cameraRightEdge) {
           tier: currentTier
         });
 
-        nextGenerationX = platformStartX + platformWidth + (300 + Math.random() * 200);
+        nextGenerationX = platformStartX + platformWidth + (320 + Math.random() * 200);
         currentTier = 0; // Return down after continuation
       }
     }
   }
 
   // Despawn old spikes and platforms offscreen left
-  while (spikes.length > 0 && spikes[0].x < player.x - 600) {
+  while (spikes.length > 0 && spikes[0].x < player.x - 700) {
     spikes.shift();
   }
-  while (platforms.length > 0 && platforms[0].x + platforms[0].width < player.x - 600) {
+  while (platforms.length > 0 && platforms[0].x + platforms[0].width < player.x - 700) {
     platforms.shift();
   }
 }
@@ -484,6 +496,10 @@ function gameLoop(currentTime) {
   // Ground Y coordinate relative to current canvas height
   const groundY = canvas.height - GROUND_HEIGHT;
 
+  // Compute camera tracking offset upfront so it is always available
+  const cameraOffsetX = player.x - canvas.width * 0.22;
+  const cameraRightEdge = cameraOffsetX + canvas.width;
+
   // 1. Update Player & World
   if (!isDead) {
     const prevY = player.y;
@@ -561,10 +577,6 @@ function gameLoop(currentTime) {
     }
   }
 
-  // Camera tracking (player stays at a fixed screen horizontal position)
-  const cameraOffsetX = player.x - canvas.width * 0.22;
-  const cameraRightEdge = cameraOffsetX + canvas.width;
-
   // Procedural World Generation (Platforms & Spikes)
   if (!isDead) {
     updateWorldGeneration(cameraRightEdge);
@@ -594,16 +606,16 @@ function gameLoop(currentTime) {
     drawCloud(screenX, cloud.y, cloud.scale);
   }
 
-  // Render Main Terrain Ground with Geometry Dash Style Gray Bricks
+  // Render Main Terrain Ground with 3x Geometry Dash Style Gray Bricks (144px)
   // Base floor fill
   ctx.fillStyle = '#dcdde1';
   ctx.fillRect(0, groundY, canvas.width, GROUND_HEIGHT);
 
-  // Render GD large block-like bricks grid pattern
+  // Render GD large block-like bricks grid pattern (3x = 144px)
   ctx.save();
   ctx.strokeStyle = '#b2bec3';
-  ctx.lineWidth = 1.5;
-  const brickSize = BLOCK_SIZE;
+  ctx.lineWidth = 2.0;
+  const brickSize = BLOCK_SIZE * 3; // 144px wide/high bricks
   const startGridX = -(cameraOffsetX % brickSize);
 
   ctx.beginPath();
@@ -619,13 +631,13 @@ function gameLoop(currentTime) {
   }
   ctx.stroke();
 
-  // Subtle interior square detail for each brick (classic GD block texture)
+  // Subtle interior square detail for each large brick (classic GD block texture)
   ctx.strokeStyle = '#ced6e0';
-  ctx.lineWidth = 1;
+  ctx.lineWidth = 1.5;
   ctx.beginPath();
   for (let x = startGridX; x <= canvas.width + brickSize; x += brickSize) {
     for (let y = groundY; y <= canvas.height; y += brickSize) {
-      ctx.strokeRect(x + 6, y + 6, brickSize - 12, brickSize - 12);
+      ctx.strokeRect(x + 12, y + 12, brickSize - 24, brickSize - 24);
     }
   }
   ctx.restore();
