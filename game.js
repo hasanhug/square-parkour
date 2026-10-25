@@ -28,34 +28,145 @@ const ROTATION_SPEED = Math.PI / JUMP_AIR_TIME; // Exactly 180° per jump
 const SPIKE_WIDTH = 48;          // Geometry dash standard 1-block width
 const SPIKE_HEIGHT = 48;         // Geometry dash standard 1-block height
 const SPIKE_BORDER = 2;          // Thin black outline
-const INITIAL_SAFE_DISTANCE = 700; // Safe runway before first spike
+const INITIAL_SAFE_DISTANCE = 700; // Safe runway before first obstacle
 
-// Spikes State
+// Platform Constants
+const BLOCK_SIZE = 48;           // 1 unit = 48px height and width
+
+// World Obstacles State
 const spikes = [];
-let nextSpikeX = INITIAL_SAFE_DISTANCE;
+const platforms = [];
+let nextGenerationX = INITIAL_SAFE_DISTANCE;
+let currentTier = 0; // Current platform tier (0 = main ground)
 
-// Spawns spike clusters ahead of the viewport
-function updateSpikeGeneration(cameraRightEdge) {
-  while (nextSpikeX < cameraRightEdge + 600) {
-    // Cluster size: 1, 2, or 3 adjacent touching spikes
-    const count = 1 + Math.floor(Math.random() * 3);
-    for (let i = 0; i < count; i++) {
-      spikes.push({
-        x: nextSpikeX + i * SPIKE_WIDTH,
-        width: SPIKE_WIDTH,
-        height: SPIKE_HEIGHT
-      });
+// Spawns ground spikes, tiered platforms, and platform spikes ahead of viewport
+function updateWorldGeneration(cameraRightEdge) {
+  const groundY = canvas.height - GROUND_HEIGHT;
+
+  while (nextGenerationX < cameraRightEdge + 800) {
+    const isPlatformEncounter = Math.random() < 0.65;
+
+    if (!isPlatformEncounter && currentTier === 0) {
+      // Standard Ground Spike Cluster (1-3 spikes)
+      const count = 1 + Math.floor(Math.random() * 3);
+      for (let i = 0; i < count; i++) {
+        spikes.push({
+          x: nextGenerationX + i * SPIKE_WIDTH,
+          baseY: groundY,
+          width: SPIKE_WIDTH,
+          height: SPIKE_HEIGHT
+        });
+      }
+      const clusterWidth = count * SPIKE_WIDTH;
+      const landingGap = 340 + Math.random() * 260;
+      nextGenerationX += clusterWidth + landingGap;
+    } else {
+      // Platform Sequence (Stepping up or down)
+      // Determine target tier (can go up by 1, stay same, or step down to 0)
+      let targetTier = currentTier;
+      if (currentTier === 0) {
+        targetTier = 1; // Step up to tier 1
+      } else {
+        const roll = Math.random();
+        if (roll < 0.40) {
+          targetTier = currentTier + 1; // Step up by 1 tier
+        } else if (roll < 0.70) {
+          targetTier = currentTier; // Continue at same tier
+        } else {
+          targetTier = 0; // Return to main ground
+        }
+      }
+
+      if (targetTier > currentTier) {
+        // Stepping UP (e.g. 0 -> 1 or 1 -> 2):
+        // Optionally spawn 1-3 spikes touching the front wall of the new platform
+        const hasFrontSpikes = Math.random() < 0.55;
+        let frontSpikeCount = 0;
+        if (hasFrontSpikes) {
+          // If jumping from ground to tier 1, 1-2 front spikes are safe to clear onto platform
+          frontSpikeCount = 1 + Math.floor(Math.random() * 2);
+          for (let i = 0; i < frontSpikeCount; i++) {
+            spikes.push({
+              x: nextGenerationX + i * SPIKE_WIDTH,
+              baseY: groundY - currentTier * BLOCK_SIZE,
+              width: SPIKE_WIDTH,
+              height: SPIKE_HEIGHT
+            });
+          }
+        }
+
+        const frontOffset = frontSpikeCount * SPIKE_WIDTH;
+        const platformStartX = nextGenerationX + frontOffset;
+
+        // Platform block length: 1 to 12 blocks
+        const blockLength = 1 + Math.floor(Math.random() * 12);
+        const platformWidth = blockLength * BLOCK_SIZE;
+        const platformY = groundY - targetTier * BLOCK_SIZE;
+
+        platforms.push({
+          x: platformStartX,
+          y: platformY,
+          width: platformWidth,
+          height: targetTier * BLOCK_SIZE, // Solid pillar to ground
+          tier: targetTier
+        });
+
+        // Optionally add spikes ON TOP of the platform if length allows
+        // Need at least 1 square landing space before a spike, and space to jump
+        if (blockLength >= 4 && Math.random() < 0.65) {
+          const maxSpikesOnPlatform = Math.min(2, blockLength - 3);
+          const spikeCount = 1 + Math.floor(Math.random() * maxSpikesOnPlatform);
+          const spikeStartBlock = 1 + Math.floor(Math.random() * (blockLength - spikeCount - 1));
+          for (let s = 0; s < spikeCount; s++) {
+            spikes.push({
+              x: platformStartX + (spikeStartBlock + s) * BLOCK_SIZE,
+              baseY: platformY,
+              width: SPIKE_WIDTH,
+              height: SPIKE_HEIGHT
+            });
+          }
+        }
+
+        currentTier = targetTier;
+        nextGenerationX = platformStartX + platformWidth;
+
+        // If tier remains > 0, leave at least 1-2 blocks of clear space before next step
+        if (currentTier > 0) {
+          // Small transition gap or direct continuation
+        }
+      } else if (targetTier < currentTier) {
+        // Stepping DOWN back to ground
+        currentTier = 0;
+        // Safe clear ground landing after stepping off platform
+        const landingRunway = 360 + Math.random() * 200;
+        nextGenerationX += landingRunway;
+      } else {
+        // Continue on current tier or gap
+        const blockLength = 2 + Math.floor(Math.random() * 6);
+        const platformStartX = nextGenerationX;
+        const platformWidth = blockLength * BLOCK_SIZE;
+        const platformY = groundY - currentTier * BLOCK_SIZE;
+
+        platforms.push({
+          x: platformStartX,
+          y: platformY,
+          width: platformWidth,
+          height: currentTier * BLOCK_SIZE,
+          tier: currentTier
+        });
+
+        nextGenerationX = platformStartX + platformWidth + (300 + Math.random() * 200);
+        currentTier = 0; // Return down after continuation
+      }
     }
-    // Jump total travel is ~235px. For 3 spikes (144px), jump spans from ~-45px to +189px.
-    // Safe landing gap: at least 320px to 540px so the player can land, stabilize, and time the next jump.
-    const clusterTotalWidth = count * SPIKE_WIDTH;
-    const landingGap = 340 + Math.random() * 260;
-    nextSpikeX += clusterTotalWidth + landingGap;
   }
 
-  // Despawn spikes that scrolled far behind player (more than 400px offscreen left)
-  while (spikes.length > 0 && spikes[0].x < nextSpikeX - 4000 && spikes[0].x < player.x - 500) {
+  // Despawn old spikes and platforms offscreen left
+  while (spikes.length > 0 && spikes[0].x < player.x - 600) {
     spikes.shift();
+  }
+  while (platforms.length > 0 && platforms[0].x + platforms[0].width < player.x - 600) {
+    platforms.shift();
   }
 }
 
@@ -181,7 +292,9 @@ function resetGame() {
   player.isGrounded = true;
 
   spikes.length = 0;
-  nextSpikeX = INITIAL_SAFE_DISTANCE;
+  platforms.length = 0;
+  nextGenerationX = INITIAL_SAFE_DISTANCE;
+  currentTier = 0;
 
   isDead = false;
   deathTimer = 0;
@@ -276,12 +389,12 @@ function drawCloud(x, y, scale) {
 }
 
 // Helper: Draw an upright white spike with a thin black border
-function drawSpike(x, groundY, width, height) {
+function drawSpike(x, baseY, width, height) {
   ctx.save();
   ctx.beginPath();
-  ctx.moveTo(x, groundY);
-  ctx.lineTo(x + width / 2, groundY - height);
-  ctx.lineTo(x + width, groundY);
+  ctx.moveTo(x, baseY);
+  ctx.lineTo(x + width / 2, baseY - height);
+  ctx.lineTo(x + width, baseY);
   ctx.closePath();
 
   // White interior
@@ -293,6 +406,47 @@ function drawSpike(x, groundY, width, height) {
   ctx.lineWidth = SPIKE_BORDER;
   ctx.lineJoin = 'round';
   ctx.stroke();
+  ctx.restore();
+}
+
+// Helper: Draw a platform with thin black border and translucent gray crisscross (+)
+function drawPlatform(x, y, width, height) {
+  ctx.save();
+  // Solid white fill
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(x, y, width, height);
+
+  // Translucent gray straight grid crisscross (+) inside each 48px unit block
+  ctx.strokeStyle = 'rgba(120, 120, 120, 0.35)';
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+
+  const numBlocksX = Math.round(width / BLOCK_SIZE);
+  const numBlocksY = Math.round(height / BLOCK_SIZE);
+
+  for (let bx = 0; bx < numBlocksX; bx++) {
+    for (let by = 0; by < numBlocksY; by++) {
+      const bX = x + bx * BLOCK_SIZE;
+      const bY = y + by * BLOCK_SIZE;
+      const midX = bX + BLOCK_SIZE / 2;
+      const midY = bY + BLOCK_SIZE / 2;
+
+      // Vertical line through block center
+      ctx.moveTo(midX, bY);
+      ctx.lineTo(midX, bY + BLOCK_SIZE);
+
+      // Horizontal line through block center
+      ctx.moveTo(bX, midY);
+      ctx.lineTo(bX + BLOCK_SIZE, midY);
+    }
+  }
+  ctx.stroke();
+
+  // Thin black outer border
+  ctx.strokeStyle = '#000000';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(x, y, width, height);
+
   ctx.restore();
 }
 
@@ -309,9 +463,9 @@ function checkSpikeCollision(playerBox, spike) {
   const marginX = spike.width * 0.25;
   const spikeLeft = spike.x + marginX;
   const spikeRight = spike.x + spike.width - marginX;
-  const groundY = canvas.height - GROUND_HEIGHT;
-  const spikeTop = groundY - spike.height * 0.75;
-  const spikeBottom = groundY;
+  const spikeBase = spike.baseY;
+  const spikeTop = spikeBase - spike.height * 0.75;
+  const spikeBottom = spikeBase;
 
   // Axis-Aligned Bounding Box (AABB) intersection check
   const overlapsX = pRight > spikeLeft && pLeft < spikeRight;
@@ -332,6 +486,8 @@ function gameLoop(currentTime) {
 
   // 1. Update Player & World
   if (!isDead) {
+    const prevY = player.y;
+
     // Constant horizontal progress
     player.x += SPEED * dt;
 
@@ -339,26 +495,63 @@ function gameLoop(currentTime) {
     player.vy += GRAVITY * dt;
     player.y += player.vy * dt;
 
-    // Ground collision check & Rotation
-    if (player.y >= groundY - player.size) { 
-      player.y = groundY - player.size;
-      
-      // Snap to nearest 90 degrees (Math.PI / 2) upon landing
-      const rightAngle = Math.PI / 2;
-      player.rotation = Math.round(player.rotation / rightAngle) * rightAngle;
+    // Determine highest standing surface directly beneath player
+    let supportSurfaceY = groundY;
+    let hitWall = false;
 
-      if (isJumpHeld) {
-        // Immediate continuous jump (Geometry Dash buffer mechanic)
-        player.vy = JUMP_FORCE;
-        player.isGrounded = false;
-      } else {
-        player.vy = 0;
-        player.isGrounded = true;
+    for (const plat of platforms) {
+      // Check horizontal overlap with platform
+      const playerRight = player.x + player.size - 4; // slight inset
+      const playerLeft = player.x + 4;
+      const platRight = plat.x + plat.width;
+      const platLeft = plat.x;
+
+      if (playerRight > platLeft && playerLeft < platRight) {
+        // Player is horizontally within this platform's span
+        // Did player land on top, or run into the side wall?
+        const platTop = plat.y;
+        
+        // If player was previously above or at the platform top level, they can land on it
+        if (prevY + player.size <= platTop + 14 && player.vy >= 0) {
+          if (platTop < supportSurfaceY) {
+            supportSurfaceY = platTop;
+          }
+        } else if (player.y + player.size > platTop + 6) {
+          // Player's feet are lower than platform top -> collided with front/side wall!
+          // Instant Death (Crash into wall)
+          hitWall = true;
+          break;
+        }
       }
+    }
+
+    if (hitWall) {
+      isDead = true;
+      deathTimer = 0;
+      const playerScreenX = player.x - cameraOffsetX;
+      triggerDeathExplosion(playerScreenX, player.y);
     } else {
-      player.isGrounded = false;
-      // Rotate clockwise while in air (Geometry Dash style)
-      player.rotation += ROTATION_SPEED * dt;
+      // Surface landing check (Ground or Platform Top)
+      if (player.y >= supportSurfaceY - player.size) {
+        player.y = supportSurfaceY - player.size;
+
+        // Snap to nearest 90 degrees (Math.PI / 2) upon landing
+        const rightAngle = Math.PI / 2;
+        player.rotation = Math.round(player.rotation / rightAngle) * rightAngle;
+
+        if (isJumpHeld) {
+          // Immediate continuous jump
+          player.vy = JUMP_FORCE;
+          player.isGrounded = false;
+        } else {
+          player.vy = 0;
+          player.isGrounded = true;
+        }
+      } else {
+        player.isGrounded = false;
+        // Rotate clockwise while in air (Geometry Dash style)
+        player.rotation += ROTATION_SPEED * dt;
+      }
     }
   } else {
     // Handle death freeze and auto-restart countdown
@@ -372,9 +565,9 @@ function gameLoop(currentTime) {
   const cameraOffsetX = player.x - canvas.width * 0.22;
   const cameraRightEdge = cameraOffsetX + canvas.width;
 
-  // Procedural Spike Generation
+  // Procedural World Generation (Platforms & Spikes)
   if (!isDead) {
-    updateSpikeGeneration(cameraRightEdge);
+    updateWorldGeneration(cameraRightEdge);
   }
 
   // Collision Detection with Spikes (Kill Blocks)
@@ -397,16 +590,47 @@ function gameLoop(currentTime) {
 
   // Render Parallax Clouds
   for (const cloud of clouds) {
-    // Parallax screen position
     const screenX = ((cloud.x - cameraOffsetX * cloud.speedFactor) % (canvas.width + 300) + (canvas.width + 300)) % (canvas.width + 300) - 150;
     drawCloud(screenX, cloud.y, cloud.scale);
   }
 
-  // Render Endless White Ground
-  ctx.fillStyle = '#ffffff';
+  // Render Main Terrain Ground with Geometry Dash Style Gray Bricks
+  // Base floor fill
+  ctx.fillStyle = '#dcdde1';
   ctx.fillRect(0, groundY, canvas.width, GROUND_HEIGHT);
 
-  // Thin Black Border on top of terrain
+  // Render GD large block-like bricks grid pattern
+  ctx.save();
+  ctx.strokeStyle = '#b2bec3';
+  ctx.lineWidth = 1.5;
+  const brickSize = BLOCK_SIZE;
+  const startGridX = -(cameraOffsetX % brickSize);
+
+  ctx.beginPath();
+  // Vertical brick lines
+  for (let x = startGridX; x <= canvas.width + brickSize; x += brickSize) {
+    ctx.moveTo(x, groundY);
+    ctx.lineTo(x, canvas.height);
+  }
+  // Horizontal brick lines
+  for (let y = groundY; y <= canvas.height; y += brickSize) {
+    ctx.moveTo(0, y);
+    ctx.lineTo(canvas.width, y);
+  }
+  ctx.stroke();
+
+  // Subtle interior square detail for each brick (classic GD block texture)
+  ctx.strokeStyle = '#ced6e0';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let x = startGridX; x <= canvas.width + brickSize; x += brickSize) {
+    for (let y = groundY; y <= canvas.height; y += brickSize) {
+      ctx.strokeRect(x + 6, y + 6, brickSize - 12, brickSize - 12);
+    }
+  }
+  ctx.restore();
+
+  // Thin Black Border on top of main terrain
   ctx.strokeStyle = '#000000';
   ctx.lineWidth = 2;
   ctx.beginPath();
@@ -414,12 +638,19 @@ function gameLoop(currentTime) {
   ctx.lineTo(canvas.width, groundY);
   ctx.stroke();
 
-  // Render Spikes
+  // Render Elevated Platforms
+  for (const plat of platforms) {
+    const platScreenX = plat.x - cameraOffsetX;
+    if (platScreenX + plat.width > -50 && platScreenX < canvas.width + 50) {
+      drawPlatform(platScreenX, plat.y, plat.width, plat.height);
+    }
+  }
+
+  // Render Spikes (on ground or on platforms)
   for (const spike of spikes) {
     const spikeScreenX = spike.x - cameraOffsetX;
-    // Only render if visible on screen
     if (spikeScreenX + spike.width > -50 && spikeScreenX < canvas.width + 50) {
-      drawSpike(spikeScreenX, groundY, spike.width, spike.height);
+      drawSpike(spikeScreenX, spike.baseY, spike.width, spike.height);
     }
   }
 
