@@ -75,7 +75,7 @@ player.y = canvas.height - GROUND_HEIGHT - player.size;
 // Death & Restart State
 let isDead = false;
 let deathTimer = 0;
-const DEATH_DURATION = 1.0; // 1 second total animation and auto-restart
+const DEATH_DURATION = 2.0; // 2 seconds total animation and auto-restart
 
 // Particle System for Explosion -> YOU DIED -> Reassemble
 const deathParticles = [];
@@ -149,7 +149,7 @@ function getSquareTargetPoints(count) {
 
 function triggerDeathExplosion(playerScreenX, playerScreenY) {
   deathParticles.length = 0;
-  const PARTICLE_COUNT = 90;
+  const PARTICLE_COUNT = 135;
   const textTargets = getYouDiedTargetPoints(PARTICLE_COUNT);
   const squareTargets = getSquareTargetPoints(PARTICLE_COUNT);
 
@@ -162,13 +162,13 @@ function triggerDeathExplosion(playerScreenX, playerScreenY) {
     deathParticles.push({
       x: originX,
       y: originY,
-      burstX: originX + Math.cos(angle) * speed * 0.32,
-      burstY: originY + Math.sin(angle) * speed * 0.32,
+      burstX: originX + Math.cos(angle) * speed * 0.4,
+      burstY: originY + Math.sin(angle) * speed * 0.4,
       textTarget: textTargets[i],
       squareTarget: squareTargets[i],
-      size: 4 + Math.random() * 3,
+      size: 3.5 + Math.random() * 2.5,
       rotation: Math.random() * Math.PI * 2,
-      rotSpeed: (Math.random() - 0.5) * 12
+      rotSpeed: (Math.random() - 0.5) * 10
     });
   }
 }
@@ -464,19 +464,30 @@ function gameLoop(currentTime) {
     for (const p of deathParticles) {
       let curX, curY;
 
-      if (progress < 0.3) {
+      // Timeline across 2.0 seconds:
+      // 0.0s - 0.45s: Phase 1 (Burst outward)
+      // 0.45s - 0.95s: Phase 2 (Morph into "YOU DIED" letters)
+      // 0.95s - 1.30s: Phase 3 (Hold steady in letters with intense glow)
+      // 1.30s - 2.00s: Phase 4 (Stream down to starting runway and reassemble)
+
+      if (deathTimer < 0.45) {
         // Phase 1: Burst outward from player
-        const t = progress / 0.3;
+        const t = easeInOutCubic(deathTimer / 0.45);
         curX = p.x + (p.burstX - p.x) * t;
         curY = p.y + (p.burstY - p.y) * t;
-      } else if (progress < 0.65) {
+      } else if (deathTimer < 0.95) {
         // Phase 2: Converge into "YOU DIED" letters
-        const t = easeInOutCubic((progress - 0.3) / 0.35);
+        const t = easeInOutCubic((deathTimer - 0.45) / 0.50);
         curX = p.burstX + (p.textTarget.x - p.burstX) * t;
         curY = p.burstY + (p.textTarget.y - p.burstY) * t;
+      } else if (deathTimer < 1.30) {
+        // Phase 3: Hold steady in "YOU DIED" letters with slight subtle vibration
+        const subtleWobble = Math.sin(deathTimer * 14 + p.x) * 1.2;
+        curX = p.textTarget.x;
+        curY = p.textTarget.y + subtleWobble;
       } else {
-        // Phase 3: Fly from "YOU DIED" to respawn starting square
-        const t = easeInOutCubic((progress - 0.65) / 0.35);
+        // Phase 4: Fly from "YOU DIED" to respawn starting square
+        const t = easeInOutCubic((deathTimer - 1.30) / 0.70);
         curX = p.textTarget.x + (p.squareTarget.x - p.textTarget.x) * t;
         curY = p.textTarget.y + (p.squareTarget.y - p.textTarget.y) * t;
       }
@@ -492,16 +503,22 @@ function gameLoop(currentTime) {
       ctx.restore();
     }
 
-    // Glow highlight for YOU DIED while particles are holding formation
-    if (progress >= 0.55 && progress <= 0.72) {
-      const textAlpha = Math.sin(((progress - 0.55) / 0.17) * Math.PI) * 0.85;
+    // Glow highlight for YOU DIED during convergence and hold (0.80s - 1.35s)
+    if (deathTimer >= 0.80 && deathTimer <= 1.35) {
+      // Smooth fade-in and fade-out of the text glow
+      let textAlpha = 1.0;
+      if (deathTimer < 0.95) {
+        textAlpha = (deathTimer - 0.80) / 0.15;
+      } else if (deathTimer > 1.25) {
+        textAlpha = (1.35 - deathTimer) / 0.10;
+      }
       ctx.save();
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.font = '900 64px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
-      ctx.fillStyle = `rgba(255, 71, 87, ${textAlpha})`;
+      ctx.fillStyle = `rgba(255, 71, 87, ${textAlpha * 0.9})`;
       ctx.shadowColor = 'rgba(255, 71, 87, 1)';
-      ctx.shadowBlur = 24;
+      ctx.shadowBlur = 28;
       ctx.fillText('YOU DIED', canvas.width / 2, canvas.height / 2);
       ctx.restore();
     }
