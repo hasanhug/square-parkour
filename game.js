@@ -72,6 +72,26 @@ const player = {
 // Set initial player vertical position on ground
 player.y = canvas.height - GROUND_HEIGHT - player.size;
 
+// Death & Restart State
+let isDead = false;
+let deathTimer = 0;
+const DEATH_DURATION = 2.0; // 2 seconds display before auto-restart
+
+function resetGame() {
+  player.x = 100;
+  player.y = canvas.height - GROUND_HEIGHT - player.size;
+  player.vy = 0;
+  player.rotation = 0;
+  player.isGrounded = true;
+
+  spikes.length = 0;
+  nextSpikeX = INITIAL_SAFE_DISTANCE;
+
+  isDead = false;
+  deathTimer = 0;
+  isJumpHeld = false;
+}
+
 // Clouds setup
 const CLOUD_COUNT = 8;
 const clouds = [];
@@ -94,6 +114,7 @@ let isJumpHeld = false;
 
 // Jump Trigger
 function tryJump() {
+  if (isDead) return;
   if (player.isGrounded) {
     player.vy = JUMP_FORCE;
     player.isGrounded = false;
@@ -204,34 +225,42 @@ function gameLoop(currentTime) {
   // Ground Y coordinate relative to current canvas height
   const groundY = canvas.height - GROUND_HEIGHT;
 
-  // 1. Update Player
-  // Constant horizontal progress
-  player.x += SPEED * dt;
+  // 1. Update Player & World
+  if (!isDead) {
+    // Constant horizontal progress
+    player.x += SPEED * dt;
 
-  // Gravity & vertical movement
-  player.vy += GRAVITY * dt;
-  player.y += player.vy * dt;
+    // Gravity & vertical movement
+    player.vy += GRAVITY * dt;
+    player.y += player.vy * dt;
 
-  // Ground collision check & Rotation
-  if (player.y >= groundY - player.size) { 
-    player.y = groundY - player.size;
-    
-    // Snap to nearest 90 degrees (Math.PI / 2) upon landing
-    const rightAngle = Math.PI / 2;
-    player.rotation = Math.round(player.rotation / rightAngle) * rightAngle;
+    // Ground collision check & Rotation
+    if (player.y >= groundY - player.size) { 
+      player.y = groundY - player.size;
+      
+      // Snap to nearest 90 degrees (Math.PI / 2) upon landing
+      const rightAngle = Math.PI / 2;
+      player.rotation = Math.round(player.rotation / rightAngle) * rightAngle;
 
-    if (isJumpHeld) {
-      // Immediate continuous jump (Geometry Dash buffer mechanic)
-      player.vy = JUMP_FORCE;
-      player.isGrounded = false;
+      if (isJumpHeld) {
+        // Immediate continuous jump (Geometry Dash buffer mechanic)
+        player.vy = JUMP_FORCE;
+        player.isGrounded = false;
+      } else {
+        player.vy = 0;
+        player.isGrounded = true;
+      }
     } else {
-      player.vy = 0;
-      player.isGrounded = true;
+      player.isGrounded = false;
+      // Rotate clockwise while in air (Geometry Dash style)
+      player.rotation += ROTATION_SPEED * dt;
     }
   } else {
-    player.isGrounded = false;
-    // Rotate clockwise while in air (Geometry Dash style)
-    player.rotation += ROTATION_SPEED * dt;
+    // Handle death freeze and auto-restart countdown
+    deathTimer += dt;
+    if (deathTimer >= DEATH_DURATION) {
+      resetGame();
+    }
   }
 
   // Camera tracking (player stays at a fixed screen horizontal position)
@@ -239,12 +268,18 @@ function gameLoop(currentTime) {
   const cameraRightEdge = cameraOffsetX + canvas.width;
 
   // Procedural Spike Generation
-  updateSpikeGeneration(cameraRightEdge);
+  if (!isDead) {
+    updateSpikeGeneration(cameraRightEdge);
+  }
 
-  // Optional: check collisions (active hitbox ready for future versions, harmless for now)
-  for (const spike of spikes) {
-    if (checkSpikeCollision(player, spike)) {
-      // Hitbox registered - no death triggered in Version 6
+  // Collision Detection with Spikes (Kill Blocks)
+  if (!isDead) {
+    for (const spike of spikes) {
+      if (checkSpikeCollision(player, spike)) {
+        isDead = true;
+        deathTimer = 0;
+        break;
+      }
     }
   }
 
@@ -303,6 +338,32 @@ function gameLoop(currentTime) {
   ctx.strokeRect(-innerOffset, -innerOffset, INNER_SQUARE_SIZE, INNER_SQUARE_SIZE);
 
   ctx.restore();
+
+  // Render "YOU DIED" Screen Overlay (Option A)
+  if (isDead) {
+    // Semi-transparent dark overlay
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.65)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    // Main "YOU DIED" Title
+    ctx.font = '900 56px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+    ctx.fillStyle = '#ff4757';
+    ctx.shadowColor = 'rgba(255, 71, 87, 0.8)';
+    ctx.shadowBlur = 18;
+    ctx.fillText('YOU DIED', canvas.width / 2, canvas.height / 2 - 14);
+
+    // Subtitle / Restarting status
+    ctx.font = '600 18px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+    ctx.fillStyle = '#ffffff';
+    ctx.shadowBlur = 0;
+    ctx.fillText('Restarting...', canvas.width / 2, canvas.height / 2 + 38);
+
+    ctx.restore();
+  }
 
   requestAnimationFrame(gameLoop);
 }
