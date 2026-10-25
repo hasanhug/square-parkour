@@ -75,7 +75,103 @@ player.y = canvas.height - GROUND_HEIGHT - player.size;
 // Death & Restart State
 let isDead = false;
 let deathTimer = 0;
-const DEATH_DURATION = 2.0; // 2 seconds display before auto-restart
+const DEATH_DURATION = 1.0; // 1 second total animation and auto-restart
+
+// Particle System for Explosion -> YOU DIED -> Reassemble
+const deathParticles = [];
+
+// Sample points forming the letters "YOU DIED" in the center of the screen
+function getYouDiedTargetPoints(count) {
+  const offscreen = document.createElement('canvas');
+  offscreen.width = 600;
+  offscreen.height = 160;
+  const octx = offscreen.getContext('2d');
+  
+  octx.font = '900 64px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+  octx.textAlign = 'center';
+  octx.textBaseline = 'middle';
+  octx.fillStyle = '#ffffff';
+  octx.fillText('YOU DIED', offscreen.width / 2, offscreen.height / 2);
+
+  const imgData = octx.getImageData(0, 0, offscreen.width, offscreen.height).data;
+  const points = [];
+  const step = 4;
+  for (let y = 0; y < offscreen.height; y += step) {
+    for (let x = 0; x < offscreen.width; x += step) {
+      const idx = (y * offscreen.width + x) * 4 + 3; // Alpha channel
+      if (imgData[idx] > 128) {
+        // Center offset relative to canvas
+        points.push({
+          x: canvas.width / 2 + (x - offscreen.width / 2),
+          y: canvas.height / 2 + (y - offscreen.height / 2)
+        });
+      }
+    }
+  }
+
+  // Shuffle points
+  for (let i = points.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [points[i], points[j]] = [points[j], points[i]];
+  }
+
+  // Return requested count (or loop points if count exceeds)
+  const result = [];
+  for (let i = 0; i < count; i++) {
+    result.push(points[i % points.length]);
+  }
+  return result;
+}
+
+// Target points on the perimeter of the player square at the respawn point (x: 100)
+function getSquareTargetPoints(count) {
+  const respawnScreenX = canvas.width * 0.22; // Player's screen X position
+  const groundY = canvas.height - GROUND_HEIGHT;
+  const respawnScreenY = groundY - PLAYER_SIZE;
+
+  const points = [];
+  for (let i = 0; i < count; i++) {
+    const side = Math.floor(Math.random() * 4);
+    const pos = Math.random() * PLAYER_SIZE;
+    let px = 0, py = 0;
+    if (side === 0) { px = pos; py = 0; }
+    else if (side === 1) { px = PLAYER_SIZE; py = pos; }
+    else if (side === 2) { px = pos; py = PLAYER_SIZE; }
+    else { px = 0; py = pos; }
+
+    points.push({
+      x: respawnScreenX + px,
+      y: respawnScreenY + py
+    });
+  }
+  return points;
+}
+
+function triggerDeathExplosion(playerScreenX, playerScreenY) {
+  deathParticles.length = 0;
+  const PARTICLE_COUNT = 90;
+  const textTargets = getYouDiedTargetPoints(PARTICLE_COUNT);
+  const squareTargets = getSquareTargetPoints(PARTICLE_COUNT);
+
+  const originX = playerScreenX + PLAYER_SIZE / 2;
+  const originY = playerScreenY + PLAYER_SIZE / 2;
+
+  for (let i = 0; i < PARTICLE_COUNT; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const speed = 180 + Math.random() * 260;
+    deathParticles.push({
+      x: originX,
+      y: originY,
+      burstX: originX + Math.cos(angle) * speed * 0.32,
+      burstY: originY + Math.sin(angle) * speed * 0.32,
+      textTarget: textTargets[i],
+      squareTarget: squareTargets[i],
+      size: 4 + Math.random() * 3,
+      rotation: Math.random() * Math.PI * 2,
+      rotSpeed: (Math.random() - 0.5) * 12
+    });
+  }
+}
 
 function resetGame() {
   player.x = 100;
@@ -90,6 +186,7 @@ function resetGame() {
   isDead = false;
   deathTimer = 0;
   isJumpHeld = false;
+  deathParticles.length = 0;
 }
 
 // Clouds setup
@@ -286,6 +383,8 @@ function gameLoop(currentTime) {
       if (checkSpikeCollision(player, spike)) {
         isDead = true;
         deathTimer = 0;
+        const playerScreenX = player.x - cameraOffsetX;
+        triggerDeathExplosion(playerScreenX, player.y);
         break;
       }
     }
@@ -324,53 +423,88 @@ function gameLoop(currentTime) {
     }
   }
 
-  // Render Player (Rotated Outer & Inner Hollow Squares)
-  const playerCenterX = (player.x - cameraOffsetX) + player.size / 2;
-  const playerCenterY = player.y + player.size / 2;
-
-  ctx.save();
-  ctx.translate(playerCenterX, playerCenterY);
-  ctx.rotate(player.rotation);
-
-  ctx.strokeStyle = PLAYER_COLOR;
-
-  // 1. Outer Hollow Square
-  ctx.lineWidth = PLAYER_BORDER;
-  const outerOffset = player.size / 2 - PLAYER_BORDER / 2;
-  const outerDrawSize = player.size - PLAYER_BORDER;
-  ctx.strokeRect(-outerOffset, -outerOffset, outerDrawSize, outerDrawSize);
-
-  // 2. Inner Hollow Square (~1/3 size)
-  ctx.lineWidth = INNER_BORDER;
-  const innerOffset = INNER_SQUARE_SIZE / 2;
-  ctx.strokeRect(-innerOffset, -innerOffset, INNER_SQUARE_SIZE, INNER_SQUARE_SIZE);
-
-  ctx.restore();
-
-  // Render "YOU DIED" Screen Overlay (Option A)
-  if (isDead) {
-    // Semi-transparent dark overlay
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.65)';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  // Render Player (only when alive)
+  if (!isDead) {
+    const playerCenterX = (player.x - cameraOffsetX) + player.size / 2;
+    const playerCenterY = player.y + player.size / 2;
 
     ctx.save();
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
+    ctx.translate(playerCenterX, playerCenterY);
+    ctx.rotate(player.rotation);
 
-    // Main "YOU DIED" Title
-    ctx.font = '900 56px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
-    ctx.fillStyle = '#ff4757';
-    ctx.shadowColor = 'rgba(255, 71, 87, 0.8)';
-    ctx.shadowBlur = 18;
-    ctx.fillText('YOU DIED', canvas.width / 2, canvas.height / 2 - 14);
+    ctx.strokeStyle = PLAYER_COLOR;
 
-    // Subtitle / Restarting status
-    ctx.font = '600 18px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
-    ctx.fillStyle = '#ffffff';
-    ctx.shadowBlur = 0;
-    ctx.fillText('Restarting...', canvas.width / 2, canvas.height / 2 + 38);
+    // 1. Outer Hollow Square
+    ctx.lineWidth = PLAYER_BORDER;
+    const outerOffset = player.size / 2 - PLAYER_BORDER / 2;
+    const outerDrawSize = player.size - PLAYER_BORDER;
+    ctx.strokeRect(-outerOffset, -outerOffset, outerDrawSize, outerDrawSize);
+
+    // 2. Inner Hollow Square (~1/3 size)
+    ctx.lineWidth = INNER_BORDER;
+    const innerOffset = INNER_SQUARE_SIZE / 2;
+    ctx.strokeRect(-innerOffset, -innerOffset, INNER_SQUARE_SIZE, INNER_SQUARE_SIZE);
 
     ctx.restore();
+  }
+
+  // Render Death Sequence: Particle Explosion -> Morph into "YOU DIED" -> Reassemble into Start Square
+  if (isDead) {
+    // Semi-transparent dark overlay (fades in smoothly)
+    const overlayAlpha = Math.min(deathTimer / 0.25, 1) * 0.7;
+    ctx.fillStyle = `rgba(0, 0, 0, ${overlayAlpha})`;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Progress 0.0 to 1.0
+    const progress = Math.min(deathTimer / DEATH_DURATION, 1.0);
+
+    // Easing helper
+    const easeInOutCubic = t => t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+
+    for (const p of deathParticles) {
+      let curX, curY;
+
+      if (progress < 0.3) {
+        // Phase 1: Burst outward from player
+        const t = progress / 0.3;
+        curX = p.x + (p.burstX - p.x) * t;
+        curY = p.y + (p.burstY - p.y) * t;
+      } else if (progress < 0.65) {
+        // Phase 2: Converge into "YOU DIED" letters
+        const t = easeInOutCubic((progress - 0.3) / 0.35);
+        curX = p.burstX + (p.textTarget.x - p.burstX) * t;
+        curY = p.burstY + (p.textTarget.y - p.burstY) * t;
+      } else {
+        // Phase 3: Fly from "YOU DIED" to respawn starting square
+        const t = easeInOutCubic((progress - 0.65) / 0.35);
+        curX = p.textTarget.x + (p.squareTarget.x - p.textTarget.x) * t;
+        curY = p.textTarget.y + (p.squareTarget.y - p.textTarget.y) * t;
+      }
+
+      ctx.save();
+      ctx.translate(curX, curY);
+      ctx.rotate(p.rotation + p.rotSpeed * deathTimer);
+
+      ctx.fillStyle = PLAYER_COLOR;
+      ctx.shadowColor = 'rgba(255, 71, 87, 0.9)';
+      ctx.shadowBlur = 8;
+      ctx.fillRect(-p.size / 2, -p.size / 2, p.size, p.size);
+      ctx.restore();
+    }
+
+    // Glow highlight for YOU DIED while particles are holding formation
+    if (progress >= 0.55 && progress <= 0.72) {
+      const textAlpha = Math.sin(((progress - 0.55) / 0.17) * Math.PI) * 0.85;
+      ctx.save();
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.font = '900 64px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+      ctx.fillStyle = `rgba(255, 71, 87, ${textAlpha})`;
+      ctx.shadowColor = 'rgba(255, 71, 87, 1)';
+      ctx.shadowBlur = 24;
+      ctx.fillText('YOU DIED', canvas.width / 2, canvas.height / 2);
+      ctx.restore();
+    }
   }
 
   requestAnimationFrame(gameLoop);
