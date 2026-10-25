@@ -16,11 +16,55 @@ const PLAYER_COLOR = '#ff4757';   // Neon coral color
 const PLAYER_BORDER = 5;         // Border thickness in pixels for outer hollow square
 const INNER_SQUARE_SIZE = 16;    // ~1/3 size of outer square
 const INNER_BORDER = 3.5;        // Border thickness for inner hollow square
-const SPEED = 400;               // Horizontal speed (pixels per second)
+
+// Speed & Progression Settings
+const BASE_SPEED = 400;          // Starting horizontal speed (pixels per second)
+let currentSpeed = BASE_SPEED;
+const SPEED_INCREMENT = 20;      // Speed increase every 20s
+const ACCEL_INTERVAL = 20.0;     // Increment interval in seconds
+const MAX_ACCEL_TIME = 180.0;    // 3 minutes speed cap (180s)
+let survivalTime = 0;            // Running survival timer
+let speedTier = 0;               // Number of speed steps triggered
+
+// Background Color Palette (14 vibrant Geometry Dash aesthetic colors)
+const BG_PALETTE = [
+  '#4a69bd', // Classic Electric Blue
+  '#6c5ce7', // Neon Purple
+  '#00b894', // Emerald Mint
+  '#e17055', // Terracotta Orange
+  '#fdcb6e', // Amber Gold
+  '#0984e3', // Deep Azure
+  '#d63031', // Crimson Red
+  '#1e3799', // Midnight Indigo
+  '#e84393', // Hot Magenta
+  '#00cec9', // Bright Cyan Teal
+  '#8e44ad', // Deep Violet
+  '#27ae60', // Lush Green
+  '#f39c12', // Tangerine
+  '#2c3e50'  // Dark Slate
+];
+
+// Color History Queue ensuring colors cannot repeat within 10 shifts
+let currentBgColor = BG_PALETTE[0];
+const recentColorHistory = [currentBgColor];
+
+function pickNextBgColor() {
+  // Filter out the last 10 colors used
+  const availableColors = BG_PALETTE.filter(c => !recentColorHistory.includes(c));
+  // Fallback in case pool is fully in history
+  const candidatePool = availableColors.length > 0 ? availableColors : BG_PALETTE.filter(c => c !== currentBgColor);
+  const nextColor = candidatePool[Math.floor(Math.random() * candidatePool.length)];
+
+  recentColorHistory.push(nextColor);
+  // Keep history strictly at last 10
+  if (recentColorHistory.length > 10) {
+    recentColorHistory.shift();
+  }
+  return nextColor;
+}
+
 const GRAVITY = 2500;            // Punchy Geometry Dash arcade gravity (pixels per second^2)
 const JUMP_FORCE = -735;         // Jump impulse (yields ~108px / 2.25 block peak clearance)
-// Air-time = 2 * (735 / 2500) ≈ 0.588s. 
-// For exact Geometry Dash 180 deg (Math.PI radians) half-flip per jump:
 const JUMP_AIR_TIME = (2 * Math.abs(JUMP_FORCE)) / GRAVITY;
 const ROTATION_SPEED = Math.PI / JUMP_AIR_TIME; // Exactly 180° per jump
 
@@ -138,10 +182,25 @@ function updateWorldGeneration(cameraRightEdge) {
                 x: platformStartX + (spikeStartBlock + s) * BLOCK_SIZE,
                 baseY: platformY,
                 width: SPIKE_WIDTH,
-                height: SPIKE_HEIGHT
+                height: SPIKE_HEIGHT,
+                hanging: false
               });
             }
           }
+        }
+
+        // Hanging Spikes on Platforms (hanging down from ceiling above the platform)
+        if (blockLength >= 7 && Math.random() < 0.40) {
+          const hangX = platformStartX + 3 * BLOCK_SIZE;
+          const hangTopY = platformY - 96; // 2 blocks above platform surface
+          spikes.push({
+            x: hangX,
+            baseY: hangTopY,
+            width: SPIKE_WIDTH,
+            height: SPIKE_HEIGHT,
+            hanging: true,
+            chainStartY: 0 // Chain from screen top
+          });
         }
 
         currentTier = targetTier;
@@ -167,9 +226,37 @@ function updateWorldGeneration(cameraRightEdge) {
           tier: currentTier
         });
 
+        // Optionally add a hanging spike over this platform
+        if (blockLength >= 6 && Math.random() < 0.40) {
+          const hangX = platformStartX + 2 * BLOCK_SIZE;
+          const hangTopY = platformY - 96;
+          spikes.push({
+            x: hangX,
+            baseY: hangTopY,
+            width: SPIKE_WIDTH,
+            height: SPIKE_HEIGHT,
+            hanging: true,
+            chainStartY: 0
+          });
+        }
+
         nextGenerationX = platformStartX + platformWidth + (320 + Math.random() * 200);
         currentTier = 0; // Return down after continuation
       }
+    }
+
+    // Occasional Hanging Spikes over Main Terrain (with translucent chains)
+    if (Math.random() < 0.30 && currentTier === 0) {
+      const hangOverGroundX = nextGenerationX - 160;
+      // Hangs ~110px above ground, so a full jump requires careful low timing or avoiding
+      spikes.push({
+        x: hangOverGroundX,
+        baseY: groundY - 110,
+        width: SPIKE_WIDTH,
+        height: SPIKE_HEIGHT,
+        hanging: true,
+        chainStartY: 0
+      });
     }
   }
 
@@ -308,95 +395,79 @@ function resetGame() {
   nextGenerationX = INITIAL_SAFE_DISTANCE;
   currentTier = 0;
 
+  // Reset Progression & Colors
+  survivalTime = 0;
+  speedTier = 0;
+  currentSpeed = BASE_SPEED;
+  currentBgColor = BG_PALETTE[0];
+  recentColorHistory.length = 0;
+  recentColorHistory.push(currentBgColor);
+
   isDead = false;
   deathTimer = 0;
   isJumpHeld = false;
   deathParticles.length = 0;
 }
 
-// Clouds setup
-const CLOUD_COUNT = 8;
-const clouds = [];
-
-function initClouds() {
-  clouds.length = 0;
-  for (let i = 0; i < CLOUD_COUNT; i++) {
-    clouds.push({
-      x: Math.random() * canvas.width * 2,
-      y: 40 + Math.random() * (canvas.height * 0.45),
-      scale: 0.6 + Math.random() * 0.8,
-      speedFactor: 0.2 + Math.random() * 0.15 // Parallax depth factor
-    });
-  }
-}
-initClouds();
-
-// Input State (Hold-to-jump buffering)
-let isJumpHeld = false;
-
-// Jump Trigger
-function tryJump() {
-  if (isDead) return;
-  if (player.isGrounded) {
-    player.vy = JUMP_FORCE;
-    player.isGrounded = false;
-  }
-}
-
-// Input Handlers
-window.addEventListener('pointerdown', (e) => {
-  if (e.button === 0) {
-    isJumpHeld = true;
-    tryJump();
-  }
-});
-
-window.addEventListener('pointerup', () => {
-  isJumpHeld = false;
-});
-
-window.addEventListener('pointercancel', () => {
-  isJumpHeld = false;
-});
-
-window.addEventListener('keydown', (e) => {
-  if (e.code === 'Space') {
-    e.preventDefault();
-    if (!e.repeat) {
-      isJumpHeld = true;
-      tryJump();
-    }
-  }
-});
-
-window.addEventListener('keyup', (e) => {
-  if (e.code === 'Space') {
-    e.preventDefault();
-    isJumpHeld = false;
-  }
-});
-
-window.addEventListener('blur', () => {
-  isJumpHeld = false;
-});
-
-// Helper: Draw a stylized fluffy cloud
-function drawCloud(x, y, scale) {
+// Helper: Draw classic Geometry Dash brick-pattern parallax background
+function drawBackgroundBricks(cameraOffsetX, bgColor) {
   ctx.save();
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
-  ctx.beginPath();
-  
-  // Base cluster circles
-  ctx.arc(x, y, 25 * scale, 0, Math.PI * 2);
-  ctx.arc(x + 20 * scale, y - 10 * scale, 30 * scale, 0, Math.PI * 2);
-  ctx.arc(x + 45 * scale, y - 12 * scale, 35 * scale, 0, Math.PI * 2);
-  ctx.arc(x + 75 * scale, y - 5 * scale, 28 * scale, 0, Math.PI * 2);
-  ctx.arc(x + 95 * scale, y, 22 * scale, 0, Math.PI * 2);
+  // Solid background color
+  ctx.fillStyle = bgColor;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-  // Flat base
-  ctx.rect(x - 10 * scale, y - 2 * scale, 110 * scale, 25 * scale);
-  
+  // Parallax scrolling brick pattern (slower scroll factor = 0.25)
+  const bgBrickW = 96;
+  const bgBrickH = 48;
+  const parallaxX = -(cameraOffsetX * 0.25) % bgBrickW;
+
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.15)';
+  ctx.lineWidth = 1.5;
+
+  let row = 0;
+  for (let y = 0; y < canvas.height; y += bgBrickH) {
+    const rowOffset = (row % 2 === 0) ? 0 : bgBrickW / 2;
+    for (let x = parallaxX + rowOffset - bgBrickW; x < canvas.width + bgBrickW; x += bgBrickW) {
+      ctx.strokeRect(x, y, bgBrickW, bgBrickH);
+    }
+    row++;
+  }
+
+  ctx.restore();
+}
+
+// Helper: Draw an inverted hanging spike with translucent hanging chain
+function drawHangingSpike(x, topY, width, height, chainStartY = 0) {
+  ctx.save();
+
+  // 1. Translucent hanging chain from ceiling/sky down to spike base
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.45)';
+  ctx.lineWidth = 2.5;
+  ctx.setLineDash([4, 4]); // Dotted/dashed link chain effect
+  ctx.beginPath();
+  const centerX = x + width / 2;
+  ctx.moveTo(centerX, chainStartY);
+  ctx.lineTo(centerX, topY);
+  ctx.stroke();
+  ctx.setLineDash([]); // Reset dash
+
+  // 2. Inverted white spike with thin black border pointing downwards
+  ctx.beginPath();
+  ctx.moveTo(x, topY); // Top-left
+  ctx.lineTo(x + width, topY); // Top-right
+  ctx.lineTo(x + width / 2, topY + height); // Bottom apex pointing down
+  ctx.closePath();
+
+  // White interior
+  ctx.fillStyle = '#ffffff';
   ctx.fill();
+
+  // Thin black border
+  ctx.strokeStyle = '#000000';
+  ctx.lineWidth = SPIKE_BORDER;
+  ctx.lineJoin = 'round';
+  ctx.stroke();
+
   ctx.restore();
 }
 
@@ -471,13 +542,21 @@ function checkSpikeCollision(playerBox, spike) {
   const pTop = playerBox.y + playerPadding;
   const pBottom = playerBox.y + playerBox.size - playerPadding;
 
-  // Spike hitbox inset (~25% shaved off sides, top apex lowered by ~25%)
+  // Spike hitbox inset (~25% shaved off sides, top/bottom apex lowered by ~25%)
   const marginX = spike.width * 0.25;
   const spikeLeft = spike.x + marginX;
   const spikeRight = spike.x + spike.width - marginX;
-  const spikeBase = spike.baseY;
-  const spikeTop = spikeBase - spike.height * 0.75;
-  const spikeBottom = spikeBase;
+
+  let spikeTop, spikeBottom;
+  if (spike.hanging) {
+    // Inverted spike hanging from baseY downwards
+    spikeTop = spike.baseY;
+    spikeBottom = spike.baseY + spike.height * 0.75; // Apex pointing down
+  } else {
+    // Upright spike
+    spikeTop = spike.baseY - spike.height * 0.75;
+    spikeBottom = spike.baseY;
+  }
 
   // Axis-Aligned Bounding Box (AABB) intersection check
   const overlapsX = pRight > spikeLeft && pLeft < spikeRight;
@@ -504,8 +583,18 @@ function gameLoop(currentTime) {
   if (!isDead) {
     const prevY = player.y;
 
-    // Constant horizontal progress
-    player.x += SPEED * dt;
+    // Survival timer & 20s difficulty progression (capped at 3 minutes / 180s)
+    survivalTime += dt;
+    const currentExpectedTier = Math.min(Math.floor(survivalTime / ACCEL_INTERVAL), Math.floor(MAX_ACCEL_TIME / ACCEL_INTERVAL));
+    if (currentExpectedTier > speedTier) {
+      speedTier = currentExpectedTier;
+      currentSpeed = BASE_SPEED + speedTier * SPEED_INCREMENT;
+      // Instant switch to next non-repeating background color (respecting 10-color history)
+      currentBgColor = pickNextBgColor();
+    }
+
+    // Constant horizontal progress with dynamic speed
+    player.x += currentSpeed * dt;
 
     // Gravity & vertical movement
     player.vy += GRAVITY * dt;
@@ -582,7 +671,7 @@ function gameLoop(currentTime) {
     updateWorldGeneration(cameraRightEdge);
   }
 
-  // Collision Detection with Spikes (Kill Blocks)
+  // Collision Detection with Spikes (Kill Blocks & Hanging Spikes)
   if (!isDead) {
     for (const spike of spikes) {
       if (checkSpikeCollision(player, spike)) {
@@ -596,15 +685,8 @@ function gameLoop(currentTime) {
   }
 
   // 2. Render Scene
-  // Sky Background
-  ctx.fillStyle = '#6ec1e4';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-  // Render Parallax Clouds
-  for (const cloud of clouds) {
-    const screenX = ((cloud.x - cameraOffsetX * cloud.speedFactor) % (canvas.width + 300) + (canvas.width + 300)) % (canvas.width + 300) - 150;
-    drawCloud(screenX, cloud.y, cloud.scale);
-  }
+  // Render Parallax Brick Wallpaper Background with dynamic color
+  drawBackgroundBricks(cameraOffsetX, currentBgColor);
 
   // Render Main Terrain Ground with 3x Geometry Dash Style Gray Bricks (144px)
   // Base floor fill
@@ -658,11 +740,15 @@ function gameLoop(currentTime) {
     }
   }
 
-  // Render Spikes (on ground or on platforms)
+  // Render Spikes (both ground/platform upright spikes and hanging spikes with chains)
   for (const spike of spikes) {
     const spikeScreenX = spike.x - cameraOffsetX;
     if (spikeScreenX + spike.width > -50 && spikeScreenX < canvas.width + 50) {
-      drawSpike(spikeScreenX, spike.baseY, spike.width, spike.height);
+      if (spike.hanging) {
+        drawHangingSpike(spikeScreenX, spike.baseY, spike.width, spike.height, spike.chainStartY || 0);
+      } else {
+        drawSpike(spikeScreenX, spike.baseY, spike.width, spike.height);
+      }
     }
   }
 
