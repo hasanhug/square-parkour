@@ -409,6 +409,55 @@ function resetGame() {
   deathParticles.length = 0;
 }
 
+// Input State (Hold-to-jump buffering)
+let isJumpHeld = false;
+
+// Jump Trigger
+function tryJump() {
+  if (isDead) return;
+  if (player.isGrounded) {
+    player.vy = JUMP_FORCE;
+    player.isGrounded = false;
+  }
+}
+
+// Input Handlers
+window.addEventListener('pointerdown', (e) => {
+  if (e.button === 0) {
+    isJumpHeld = true;
+    tryJump();
+  }
+});
+
+window.addEventListener('pointerup', () => {
+  isJumpHeld = false;
+});
+
+window.addEventListener('pointercancel', () => {
+  isJumpHeld = false;
+});
+
+window.addEventListener('keydown', (e) => {
+  if (e.code === 'Space') {
+    e.preventDefault();
+    if (!e.repeat) {
+      isJumpHeld = true;
+      tryJump();
+    }
+  }
+});
+
+window.addEventListener('keyup', (e) => {
+  if (e.code === 'Space') {
+    e.preventDefault();
+    isJumpHeld = false;
+  }
+});
+
+window.addEventListener('blur', () => {
+  isJumpHeld = false;
+});
+
 // Helper: Draw classic Geometry Dash brick-pattern parallax background
 function drawBackgroundBricks(cameraOffsetX, bgColor) {
   ctx.save();
