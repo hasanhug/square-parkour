@@ -199,18 +199,26 @@ function drawSpike(x, groundY, width, height) {
   ctx.restore();
 }
 
-// Geometry Dash accurate spike hitbox check (active hitboxes for future death logic)
+// Geometry Dash style forgiving spike hitbox check (Option A)
 function checkSpikeCollision(playerBox, spike) {
-  // Inset hitbox slightly (forgiving GD style)
-  const marginX = spike.width * 0.18;
+  // Player hitbox inset (4px padding inward from the visual border)
+  const playerPadding = 4;
+  const pLeft = playerBox.x + playerPadding;
+  const pRight = playerBox.x + playerBox.size - playerPadding;
+  const pTop = playerBox.y + playerPadding;
+  const pBottom = playerBox.y + playerBox.size - playerPadding;
+
+  // Spike hitbox inset (~25% shaved off sides, top apex lowered by ~25%)
+  const marginX = spike.width * 0.25;
   const spikeLeft = spike.x + marginX;
   const spikeRight = spike.x + spike.width - marginX;
-  const spikeTop = canvas.height - GROUND_HEIGHT - spike.height * 0.85;
-  const spikeBottom = canvas.height - GROUND_HEIGHT;
+  const groundY = canvas.height - GROUND_HEIGHT;
+  const spikeTop = groundY - spike.height * 0.75;
+  const spikeBottom = groundY;
 
-  // AABB check against player bounding box
-  const overlapsX = playerBox.x + playerBox.size > spikeLeft && playerBox.x < spikeRight;
-  const overlapsY = playerBox.y + playerBox.size > spikeTop && playerBox.y < spikeBottom;
+  // Axis-Aligned Bounding Box (AABB) intersection check
+  const overlapsX = pRight > spikeLeft && pLeft < spikeRight;
+  const overlapsY = pBottom > spikeTop && pTop < spikeBottom;
 
   return overlapsX && overlapsY;
 }
