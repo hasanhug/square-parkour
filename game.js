@@ -18,11 +18,11 @@ const INNER_SQUARE_SIZE = 16;    // ~1/3 size of outer square
 const INNER_BORDER = 3.5;        // Border thickness for inner hollow square
 
 // Speed & Progression Settings
-const BASE_SPEED = 400;          // Starting horizontal speed (pixels per second)
+const BASE_SPEED = 550;          // Starting horizontal speed (pixels per second)
 let currentSpeed = BASE_SPEED;
-const SPEED_INCREMENT = 20;      // Speed increase every 20s
-const ACCEL_INTERVAL = 20.0;     // Increment interval in seconds
-const MAX_ACCEL_TIME = 180.0;    // 3 minutes speed cap (180s)
+const SPEED_INCREMENT = 25;      // Speed increase every 15s
+const ACCEL_INTERVAL = 15.0;     // Increment interval in seconds
+const MAX_ACCEL_TIME = 180.0;    // 3 minutes speed cap: 12 bumps at 15 -> max speed 850
 let survivalTime = 0;            // Running survival timer
 let speedTier = 0;               // Number of speed steps triggered
 
@@ -72,7 +72,7 @@ const ROTATION_SPEED = Math.PI / JUMP_AIR_TIME; // Exactly 180° per jump
 const SPIKE_WIDTH = 48;          // Geometry dash standard 1-block width
 const SPIKE_HEIGHT = 48;         // Geometry dash standard 1-block height
 const SPIKE_BORDER = 2;          // Thin black outline
-const INITIAL_SAFE_DISTANCE = 700; // Safe runway before first obstacle
+const INITIAL_SAFE_DISTANCE = 950; // Safe runway before first obstacle
 
 // Platform Constants
 const BLOCK_SIZE = 48;           // 1 unit = 48px height and width
@@ -82,11 +82,11 @@ const HANG_CLUSTER_MIN = 1;      // Cluster size range (in spikes)
 const HANG_CLUSTER_MAX = 10;
 const HANG_GAP_OVER_SPIKES = 3;  // Tip 2 units above the player's head (player is 1 unit tall) when spikes are below
 const HANG_GAP_FLAT = 1;         // Tip 1 unit above a clean surface: player fits underneath, no room to jump
-const LOW_HANG_RUNWAY = 480;     // Flat spike-free px before/after 1-unit-gap clusters (max jump reach ~341px)
+const LOW_HANG_RUNWAY = 600;     // Flat spike-free px before/after 1-unit-gap clusters (max jump reach ~341px)
 
 // Step-Up & Stair Settings
 const STEP_UP_LEAD_BLOCKS = 4;   // Clear units on a platform before the first spike
-const STAIR_STEP_BLOCKS = 4;     // Width of each descending stair step (absorbs max-speed fall drift)
+const STAIR_STEP_BLOCKS = 5;     // Width of each descending stair step (absorbs max-speed fall drift)
 
 // World Obstacles State
 const spikes = [];
@@ -156,7 +156,8 @@ function updateWorldGeneration(cameraRightEdge) {
           segmentWidth = Math.max(segmentWidth, hangCount * SPIKE_WIDTH);
         }
 
-        const landingGap = 350 + Math.random() * 250;
+        // Gap must exceed the max jump reach (~500px) so landings never overshoot into the next segment
+        const landingGap = 520 + Math.random() * 240;
         nextGenerationX += segmentWidth + landingGap;
       } else if (groundRoll < 0.80) {
         // Low hanging cluster over flat ground: tip 1 unit above ground, so the
@@ -276,8 +277,8 @@ function updateWorldGeneration(cameraRightEdge) {
         // Stepping DOWN: descend stair-by-stair to tier 1 (no direct falls from 2+ height)
         const stairEndX = buildDescentStairs(nextGenerationX, currentTier, groundY);
         currentTier = 0;
-        // Safe clear ground landing after stepping off the final tier-1 stair
-        nextGenerationX = stairEndX + (380 + Math.random() * 200);
+        // Safe clear ground landing after jumping off the final tier-1 stair (covers a full max-speed jump)
+        nextGenerationX = stairEndX + (520  + Math.random() * 200);
       } else {
         // Continuation on current tier (minimum 5 blocks)
         const blockLength = 5 + Math.floor(Math.random() * 6);
@@ -692,7 +693,7 @@ function gameLoop(currentTime) {
   if (!isDead) {
     const prevY = player.y;
 
-    // Survival timer & 20s difficulty progression (capped at 3 minutes / 180s)
+    // Survival timer & 15s difficulty progression (capped at 3 minutes / 180s)
     survivalTime += dt;
     const currentExpectedTier = Math.min(Math.floor(survivalTime / ACCEL_INTERVAL), Math.floor(MAX_ACCEL_TIME / ACCEL_INTERVAL));
     if (currentExpectedTier > speedTier) {
