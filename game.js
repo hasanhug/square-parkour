@@ -77,11 +77,55 @@ const INITIAL_SAFE_DISTANCE = 700; // Safe runway before first obstacle
 // Platform Constants
 const BLOCK_SIZE = 48;           // 1 unit = 48px height and width
 
+// Hanging Spike Cluster Settings
+const HANG_CLUSTER_MIN = 1;      // Cluster size range (in spikes)
+const HANG_CLUSTER_MAX = 10;
+const HANG_GAP_OVER_SPIKES = 3;  // Tip 2 units above the player's head (player is 1 unit tall) when spikes are below
+const HANG_GAP_FLAT = 1;         // Tip 1 unit above a clean surface: player fits underneath, no room to jump
+const LOW_HANG_RUNWAY = 480;     // Flat spike-free px before/after 1-unit-gap clusters (max jump reach ~341px)
+
+// Step-Up & Stair Settings
+const STEP_UP_LEAD_BLOCKS = 4;   // Clear units on a platform before the first spike
+const STAIR_STEP_BLOCKS = 4;     // Width of each descending stair step (absorbs max-speed fall drift)
+
 // World Obstacles State
 const spikes = [];
 const platforms = [];
 let nextGenerationX = INITIAL_SAFE_DISTANCE;
 let currentTier = 0; // Current platform tier (0 = main ground)
+
+// Spawns a contiguous cluster of hanging spikes whose downward tips sit
+// `gapUnits` blocks above the given surface (chains drawn from the screen top).
+function spawnHangingCluster(xStart, surfaceY, gapUnits, count) {
+  const topEdgeY = surfaceY - (gapUnits + 1) * BLOCK_SIZE; // Flat top edge 1 block above the tip
+  for (let i = 0; i < count; i++) {
+    spikes.push({
+      x: xStart + i * SPIKE_WIDTH,
+      baseY: topEdgeY,
+      width: SPIKE_WIDTH,
+      height: SPIKE_HEIGHT,
+      hanging: true,
+      chainStartY: 0
+    });
+  }
+}
+
+// Builds spike-free descending stairs from `fromTier` down to tier 1, one tier at a
+// time, so the player never falls more than 1 unit. Returns the stairs' right edge.
+function buildDescentStairs(startX, fromTier, groundY) {
+  let stairX = startX;
+  for (let t = fromTier - 1; t >= 1; t--) {
+    platforms.push({
+      x: stairX,
+      y: groundY - t * BLOCK_SIZE,
+      width: STAIR_STEP_BLOCKS * BLOCK_SIZE,
+      height: t * BLOCK_SIZE,
+      tier: t
+    });
+    stairX += STAIR_STEP_BLOCKS * BLOCK_SIZE;
+  }
+  return stairX;
+}
 
 // Spawns ground spikes, tiered platforms, and platform spikes ahead of viewport
 function updateWorldGeneration(cameraRightEdge) {
@@ -91,19 +135,40 @@ function updateWorldGeneration(cameraRightEdge) {
     const isPlatformEncounter = Math.random() < 0.70;
 
     if (!isPlatformEncounter && currentTier === 0) {
-      // Standard Ground Spike Cluster (1-3 spikes)
-      const count = 1 + Math.floor(Math.random() * 3);
-      for (let i = 0; i < count; i++) {
-        spikes.push({
-          x: nextGenerationX + i * SPIKE_WIDTH,
-          baseY: groundY,
-          width: SPIKE_WIDTH,
-          height: SPIKE_HEIGHT
-        });
+      const groundRoll = Math.random();
+      if (groundRoll < 0.60) {
+        // Standard Ground Spike Cluster (1-3 spikes; 4+ is un-jumpable)
+        const count = 1 + Math.floor(Math.random() * 3);
+        for (let i = 0; i < count; i++) {
+          spikes.push({
+            x: nextGenerationX + i * SPIKE_WIDTH,
+            baseY: groundY,
+            width: SPIKE_WIDTH,
+            height: SPIKE_HEIGHT
+          });
+        }
+        let segmentWidth = count * SPIKE_WIDTH;
+
+        // Optional hanging cluster above the spikes (tips 2 units above the player's head)
+        if (Math.random() < 0.35) {
+          const hangCount = HANG_CLUSTER_MIN + Math.floor(Math.random() * HANG_CLUSTER_MAX);
+          spawnHangingCluster(nextGenerationX, groundY, HANG_GAP_OVER_SPIKES, hangCount);
+          segmentWidth = Math.max(segmentWidth, hangCount * SPIKE_WIDTH);
+        }
+
+        const landingGap = 350 + Math.random() * 250;
+        nextGenerationX += segmentWidth + landingGap;
+      } else if (groundRoll < 0.80) {
+        // Low hanging cluster over flat ground: tip 1 unit above ground, so the
+        // player fits underneath but there is no space to jump. Flat, spike-free
+        // runways on both sides guarantee a safe run-under approach.
+        const hangCount = HANG_CLUSTER_MIN + Math.floor(Math.random() * HANG_CLUSTER_MAX);
+        spawnHangingCluster(nextGenerationX + LOW_HANG_RUNWAY, groundY, HANG_GAP_FLAT, hangCount);
+        nextGenerationX += LOW_HANG_RUNWAY + hangCount * SPIKE_WIDTH + LOW_HANG_RUNWAY;
+      } else {
+        // Flat breather segment
+        nextGenerationX += 320 + Math.random() * 280;
       }
-      const clusterWidth = count * SPIKE_WIDTH;
-      const landingGap = 350 + Math.random() * 250;
-      nextGenerationX += clusterWidth + landingGap;
     } else {
       // Determine target tier (can go up by 1, stay same, or step down to 0)
       let targetTier = currentTier;
@@ -170,13 +235,15 @@ function updateWorldGeneration(cameraRightEdge) {
         });
 
         // Optionally add spikes ON TOP of the platform:
-        // RULE: Always at least 2 squares (2 * BLOCK_SIZE = 96px) of clear space before the first spike!
-        if (blockLength >= 6 && Math.random() < 0.65) {
-          const minLeadBlocks = 2; // At least 2 clear squares of space
+        // RULE: Always at least 4 units of clear space before the first spike!
+        let spikeStartBlock = -1;
+        let spikeCount = 0;
+        if (blockLength >= 7 && Math.random() < 0.65) {
+          const minLeadBlocks = STEP_UP_LEAD_BLOCKS; // Clear landing space after stepping up
           const availableBlocks = blockLength - minLeadBlocks - 2; // Leave at least 2 exit landing blocks
           if (availableBlocks >= 1) {
-            const spikeCount = 1 + Math.floor(Math.random() * Math.min(2, availableBlocks));
-            const spikeStartBlock = minLeadBlocks + Math.floor(Math.random() * (availableBlocks - spikeCount + 1));
+            spikeCount = 1 + Math.floor(Math.random() * Math.min(2, availableBlocks));
+            spikeStartBlock = minLeadBlocks + Math.floor(Math.random() * (availableBlocks - spikeCount + 1));
             for (let s = 0; s < spikeCount; s++) {
               spikes.push({
                 x: platformStartX + (spikeStartBlock + s) * BLOCK_SIZE,
@@ -189,28 +256,28 @@ function updateWorldGeneration(cameraRightEdge) {
           }
         }
 
-        // Hanging Spikes on Platforms (hanging down from ceiling above the platform)
-        if (blockLength >= 7 && Math.random() < 0.40) {
-          const hangX = platformStartX + 3 * BLOCK_SIZE;
-          const hangTopY = platformY - 96; // 2 blocks above platform surface
-          spikes.push({
-            x: hangX,
-            baseY: hangTopY,
-            width: SPIKE_WIDTH,
-            height: SPIKE_HEIGHT,
-            hanging: true,
-            chainStartY: 0 // Chain from screen top
-          });
+        // Optional hanging cluster above the on-platform spikes (tips 2 units above
+        // the player's head). Never placed LOW on a step-up: the landing jump from
+        // below passes through the low band, so low hangers only appear where the
+        // player arrives running (flat ground / continuation platforms).
+        if (spikeCount > 0 && Math.random() < 0.40) {
+          const overhang = Math.floor(Math.random() * 2); // May start slightly left of the spikes
+          const startBlock = Math.max(STEP_UP_LEAD_BLOCKS, spikeStartBlock - overhang);
+          const maxBlocks = blockLength - 2 - startBlock; // Respect the 2 exit blocks
+          if (maxBlocks >= 1) {
+            const hangCount = Math.max(1, Math.min(HANG_CLUSTER_MAX, spikeCount + Math.floor(Math.random() * 3), maxBlocks));
+            spawnHangingCluster(platformStartX + startBlock * BLOCK_SIZE, platformY, HANG_GAP_OVER_SPIKES, hangCount);
+          }
         }
 
         currentTier = targetTier;
         nextGenerationX = platformStartX + platformWidth;
       } else if (targetTier < currentTier) {
-        // Stepping DOWN back to ground
+        // Stepping DOWN: descend stair-by-stair to tier 1 (no direct falls from 2+ height)
+        const stairEndX = buildDescentStairs(nextGenerationX, currentTier, groundY);
         currentTier = 0;
-        // Safe clear ground landing after stepping off platform
-        const landingRunway = 380 + Math.random() * 200;
-        nextGenerationX += landingRunway;
+        // Safe clear ground landing after stepping off the final tier-1 stair
+        nextGenerationX = stairEndX + (380 + Math.random() * 200);
       } else {
         // Continuation on current tier (minimum 5 blocks)
         const blockLength = 5 + Math.floor(Math.random() * 6);
@@ -226,37 +293,26 @@ function updateWorldGeneration(cameraRightEdge) {
           tier: currentTier
         });
 
-        // Optionally add a hanging spike over this platform
-        if (blockLength >= 6 && Math.random() < 0.40) {
-          const hangX = platformStartX + 2 * BLOCK_SIZE;
-          const hangTopY = platformY - 96;
-          spikes.push({
-            x: hangX,
-            baseY: hangTopY,
-            width: SPIKE_WIDTH,
-            height: SPIKE_HEIGHT,
-            hanging: true,
-            chainStartY: 0
-          });
+        // Optional LOW hanging cluster over the platform runway: tip 1 unit above the
+        // surface. The player arrives here running (no forced jump), making this a
+        // pure "don't jump" zone. 4 clear lead-in units and 2 exit units are reserved.
+        if (blockLength >= 7 && Math.random() < 0.35) {
+          const maxBlocks = blockLength - STEP_UP_LEAD_BLOCKS - 2;
+          if (maxBlocks >= 1) {
+            const hangCount = Math.min(HANG_CLUSTER_MAX, 1 + Math.floor(Math.random() * HANG_CLUSTER_MAX), maxBlocks);
+            spawnHangingCluster(platformStartX + STEP_UP_LEAD_BLOCKS * BLOCK_SIZE, platformY, HANG_GAP_FLAT, hangCount);
+          }
         }
 
-        nextGenerationX = platformStartX + platformWidth + (320 + Math.random() * 200);
+        if (currentTier >= 2) {
+          // No direct falls: descend stair-by-stair to tier 1, then jump off to ground
+          const stairEndX = buildDescentStairs(platformStartX + platformWidth, currentTier, groundY);
+          nextGenerationX = stairEndX + (380 + Math.random() * 200);
+        } else {
+          nextGenerationX = platformStartX + platformWidth + (320 + Math.random() * 200);
+        }
         currentTier = 0; // Return down after continuation
       }
-    }
-
-    // Occasional Hanging Spikes over Main Terrain (with translucent chains)
-    if (Math.random() < 0.30 && currentTier === 0) {
-      const hangOverGroundX = nextGenerationX - 160;
-      // Hangs ~110px above ground, so a full jump requires careful low timing or avoiding
-      spikes.push({
-        x: hangOverGroundX,
-        baseY: groundY - 110,
-        width: SPIKE_WIDTH,
-        height: SPIKE_HEIGHT,
-        hanging: true,
-        chainStartY: 0
-      });
     }
   }
 
@@ -281,6 +337,9 @@ const player = {
 
 // Set initial player vertical position on ground
 player.y = canvas.height - GROUND_HEIGHT - player.size;
+
+// Landing rotation alignment: eased to the nearest 90 degrees so the snap is invisible
+let rotationAlignTarget = null;
 
 // Death & Restart State
 let isDead = false;
@@ -389,6 +448,7 @@ function resetGame() {
   player.vy = 0;
   player.rotation = 0;
   player.isGrounded = true;
+  rotationAlignTarget = null;
 
   spikes.length = 0;
   platforms.length = 0;
@@ -689,9 +749,17 @@ function gameLoop(currentTime) {
       if (player.y >= supportSurfaceY - player.size) {
         player.y = supportSurfaceY - player.size;
 
-        // Snap to nearest 90 degrees (Math.PI / 2) upon landing
-        const rightAngle = Math.PI / 2;
-        player.rotation = Math.round(player.rotation / rightAngle) * rightAngle;
+        // Ease to the nearest 90 degrees over ~0.1s instead of a visible hard snap
+        if (rotationAlignTarget === null) {
+          const rightAngle = Math.PI / 2;
+          rotationAlignTarget = Math.round(player.rotation / rightAngle) * rightAngle;
+        }
+        const rotDiff = rotationAlignTarget - player.rotation;
+        if (Math.abs(rotDiff) < 0.005) {
+          player.rotation = rotationAlignTarget;
+        } else {
+          player.rotation += rotDiff * Math.min(1, dt * 35);
+        }
 
         if (isJumpHeld) {
           // Immediate continuous jump
@@ -703,6 +771,7 @@ function gameLoop(currentTime) {
         }
       } else {
         player.isGrounded = false;
+        rotationAlignTarget = null; // Fresh target computed on the next landing
         // Rotate clockwise while in air (Geometry Dash style)
         player.rotation += ROTATION_SPEED * dt;
       }
